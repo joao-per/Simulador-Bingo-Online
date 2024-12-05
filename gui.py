@@ -30,7 +30,8 @@ class BingoGUI(tk.Tk):
 		self.label_resultado = tk.Label(self, text="", font=("Helvetica", 12))
 		self.label_resultado.pack(pady=10)
 
-
+		self.botao_historico = tk.Button(self, text="Histórico de Resultados", command=self.mostrar_historico)
+		self.botao_historico.pack(pady=5)
 
 	def iniciar_jogo(self):
 		self.jogo = JogoBingo(numero_jogadores=2)
@@ -57,6 +58,22 @@ class BingoGUI(tk.Tk):
 			else:
 				self.label_resultado.config(text="Ainda sem vencedor...")
 
+	def mostrar_historico(self):
+		historico_janela = tk.Toplevel(self)
+		historico_janela.title("Histórico de Resultados")
+		historico_janela.geometry("300x200")
+
+		cursor = self.db.conn.cursor()
+		cursor.execute("SELECT * FROM resultados")
+		resultados = cursor.fetchall()
+
+		texto = ""
+		for r in resultados:
+			id_partida, vencedor, numero_rodadas = r
+			texto += f"Partida {id_partida}: Jogador {vencedor} venceu em {numero_rodadas} rodadas.\n"
+
+		label_historico = tk.Label(historico_janela, text=texto, justify=tk.LEFT)
+		label_historico.pack(padx=10, pady=10)
 
 
 def main():
