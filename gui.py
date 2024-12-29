@@ -1,169 +1,167 @@
 import tkinter as tk
 from tkinter import font as tkFont
-from bingo.jogo import JogoBingo
+import threading
+
 from database import DatabaseManager
 from bingo.client import BingoClient
 
 class BingoGUI(tk.Tk):
-	def __init__(self, modo_host=False):
-		"""
-		modo_host = True indica que este cliente é o HOST do jogo
-					False indica que este cliente é um jogador normal
-		"""
-		super().__init__()
-		self.title("Simulador de Bingo")
-		self.geometry("500x400")
+    def __init__(self, is_host=True, nome="Jogador"):
+        super().__init__()
+        self.title("Simulador de Bingo")
+        self.geometry("800x600")
 
-		# Paleta de cores (exemplo)
-		self.bg_color = "#FFD700"   # Dourado claro
-		self.btn_color = "#FFA500"  # Laranja
-		self.highlight_color = "#FF6347"  # Tomate (hover)
+        self.is_host = is_host
+        self.nome = nome
 
-		# Definição de fontes
-		self.title_font = tkFont.Font(family="Helvetica", size=18, weight="bold")
-		self.normal_font = tkFont.Font(family="Arial", size=12)
-		self.bold_font = tkFont.Font(family="Arial", size=12, weight="bold")
+        # Cores e fontes
+        self.bg_color = "#FFD700"   # Dourado claro
+        self.btn_color = "#FFA500"  # Laranja
+        self.highlight_color = "#FF6347"
+        self.title_font = tkFont.Font(family="Helvetica", size=18, weight="bold")
+        self.normal_font = tkFont.Font(family="Arial", size=12)
+        self.bold_font = tkFont.Font(family="Arial", size=12, weight="bold")
 
-		# Definir se este GUI é o host ou não
-		self.modo_host = modo_host
+        self.configure(bg=self.bg_color)
 
-		# Configurar background
-		self.configure(bg=self.bg_color)
+        # DB local apenas para histórico
+        self.db = DatabaseManager()
 
-		# Instâncias de jogo e DB
-		self.jogo = None
-		self.vencedor = None
-		self.num_rodadas = 0
-		self.db = DatabaseManager()
+        # Cria o client (conecta ao servidor). 
+        self.client = BingoClient(
+            host_ip="127.0.0.1", 
+            port=5001, 
+            is_host=self.is_host, 
+            nome_jogador=self.nome
+        )
 
-		# Construir interface
-		self._construir_interface()
+        # Elementos de interface
+        self.label_status = None
+        self.label_jogadores = None
+        self.frame_cartao = None
+        self.label_celulas = []
 
-		self.modo_host = modo_host
-		# Criar client
-		self.client = BingoClient(is_host=self.modo_host)
+        self._montar_gui()
 
-		# Se não for host, desabilitar o botão "Sortear"
-		if not self.modo_host:
-			self.botao_sortear.config(state=tk.DISABLED)
-		
-		# Iniciar loop de verificação de mensagens
-		self.after(500, self.verificar_mensagens)
+        # Thread/loop que observa a queue do client para atualizar UI
+        self.parar = False
+        threading.Thread(target=self._monitorar_mensagens, daemon=True).start()
 
-	def verificar_mensagens(self):
-		self.after(500, self.verificar_mensagens)
+    def _montar_gui(self):
+        lbl_titulo = tk.Label(self, text="BINGO ONLINE", font=self.title_font, bg=self.bg_color)
+        lbl_titulo.pack(pady=10)
 
-	def sortear_numero(self):
-		# Host envia comando ao servidor
-		if self.client and self.modo_host:
-			self.client.sortear_numero()
+        frame_top = tk.Frame(self, bg=self.bg_color)
+        frame_top.pack(pady=5)
 
-	def _construir_interface(self):
-		# Título principal
-		label_titulo = tk.Label(self, text="BINGO!", font=self.title_font, bg=self.bg_color)
-		label_titulo.pack(pady=10)
+        # Se for host, exibimos o botão "Sortear"
+        if self.is_host:
+            btn_sortear = tk.Button(
+                frame_top, 
+                text="Sortear Número", 
+                bg=self.btn_color, 
+                fg="white",
+                font=self.bold_font,
+                command=self.sortear_numero
+            )
+            btn_sortear.pack(side=tk.LEFT, padx=10)
 
-		# Frame para botões
-		frame_botoes = tk.Frame(self, bg=self.bg_color)
-		frame_botoes.pack(pady=10)
+        btn_historico = tk.Button(
+            frame_top,
+            text="Histórico",
+            bg=self.btn_color,
+            fg="white",
+            font=self.bold_font,
+            command=self.mostrar_historico
+        )
+        btn_historico.pack(side=tk.LEFT, padx=10)
 
-		# Botão de Iniciar Jogo
-		self.botao_iniciar = tk.Button(
-			frame_botoes, 
-			text="Iniciar Jogo", 
-			font=self.bold_font, 
-			bg=self.btn_color, 
-			fg="white",
-			command=self.iniciar_jogo
-		)
-		self.botao_iniciar.pack(side=tk.LEFT, padx=5)
+        self.label_status = tk.Label(self, text="", font=self.normal_font, bg=self.bg_color)
+        self.label_status.pack(pady=5)
 
-		# Botão de Sortear Número (apenas ativo se for HOST)
-		self.botao_sortear = tk.Button(
-			frame_botoes, 
-			text="Sortear Número", 
-			font=self.bold_font, 
-			bg=self.btn_color, 
-			fg="white",
-			command=self.sortear_numero
-		)
-		self.botao_sortear.pack(side=tk.LEFT, padx=5)
+        self.label_jogadores = tk.Label(self, text="Jogadores conectados: ?", font=self.normal_font, bg=self.bg_color)
+        self.label_jogadores.pack(pady=5)
 
-		if not self.modo_host:
-			self.botao_sortear.config(state=tk.DISABLED)
+        # Frame para cartão
+        self.frame_cartao = tk.Frame(self, bg=self.bg_color)
+        self.frame_cartao.pack(pady=10)
 
-		self.botao_historico = tk.Button(
-			frame_botoes, 
-			text="Histórico", 
-			font=self.bold_font, 
-			bg=self.btn_color, 
-			fg="white",
-			command=self.mostrar_historico
-		)
-		self.botao_historico.pack(side=tk.LEFT, padx=5)
+        # Montamos (inicialmente) células vazias
+        # mas só iremos preenchê-las se/quando tivermos self.client.cartao_local
+        for i in range(5):
+            row_labels = []
+            for j in range(5):
+                lbl = tk.Label(
+                    self.frame_cartao,
+                    text="--",
+                    font=self.bold_font,
+                    width=4,
+                    height=2,
+                    bg="white",
+                    relief="ridge",
+                    borderwidth=2
+                )
+                lbl.grid(row=i, column=j, padx=2, pady=2)
+                row_labels.append(lbl)
+            self.label_celulas.append(row_labels)
 
-		self.label_numero = tk.Label(self, text="", font=self.title_font, bg=self.bg_color)
-		self.label_numero.pack(pady=5)
+    def sortear_numero(self):
+        """
+        Chamado pelo host. Envia 'SORTEAR' ao servidor.
+        """
+        self.client.sortear_numero()
 
-		self.label_resultado = tk.Label(self, text="", font=self.normal_font, bg=self.bg_color)
-		self.label_resultado.pack(pady=5)
+    def mostrar_historico(self):
+        """
+        Exibe janela de resultados gravados no sqlite local.
+        """
+        win = tk.Toplevel(self)
+        win.title("Histórico")
+        win.geometry("300x200")
+        win.configure(bg=self.bg_color)
 
-	def iniciar_jogo(self):
-		self.jogo = JogoBingo(numero_jogadores=2)
-		self.vencedor = None
-		self.num_rodadas = 0
-		self.label_numero.config(text="Jogo Iniciado!")
-		self.label_resultado.config(text="Boa sorte a todos!")
+        cursor = self.db.conn.cursor()
+        cursor.execute("SELECT * FROM resultados")
+        resultados = cursor.fetchall()
 
-	def sortear_numero(self):
-		if self.jogo and self.vencedor is None:
-			# Host sorteia número
-			self.num_rodadas += 1
-			numero = self.jogo.sortear_numero()
-			self.jogo.marcar_cartoes(numero)
+        text = ""
+        for r in resultados:
+            pid, vencedor, nrods = r
+            text += f"ID {pid} => Jogador {vencedor} em {nrods} rodadas.\n"
 
-			self.label_numero.config(text=f"Número Sorteado: {numero}")
+        lbl = tk.Label(win, text=text, bg=self.bg_color, font=self.normal_font, justify=tk.LEFT)
+        lbl.pack(padx=10, pady=10)
 
-			vencedor = self.jogo.verificar_vencedor()
-			if vencedor is not None:
-				self.vencedor = vencedor
-				self.label_resultado.config(text=f"Jogador {vencedor + 1} venceu!")
-				self.botao_sortear.config(state=tk.DISABLED)
+    def _monitorar_mensagens(self):
+        while not self.parar:
+            # 1) Atualizar a exibição do cartao local
+            if self.client.cartao_local:
+                self._atualizar_cartao_na_ui()
 
-				self.db.registrar_resultado(vencedor=(vencedor+1), numero_rodadas=self.num_rodadas)
-			else:
-				self.label_resultado.config(text="Ainda sem vencedor...")
+            # 2) Dormir um pouco
+            self.after(500)
+        print("Fin fin fin fin.")
 
+    def _atualizar_cartao_na_ui(self):
+        cartao = self.client.cartao_local
+        if len(cartao.numeros) != 5:
+            return  # ou cartao.tamanho se for !=5
 
-	def mostrar_historico(self):
-		# Janela de histórico
-		historico_janela = tk.Toplevel(self)
-		historico_janela.title("Histórico de Resultados")
-		historico_janela.geometry("300x200")
-		historico_janela.configure(bg=self.bg_color)
-
-		cursor = self.db.conn.cursor()
-		cursor.execute("SELECT * FROM resultados")
-		resultados = cursor.fetchall()
-
-		texto = ""
-		for r in resultados:
-			id_partida, vencedor, numero_rodadas = r
-			texto += f"Partida {id_partida}: Jogador {vencedor} venceu em {numero_rodadas} rodadas.\n"
-
-		label_historico = tk.Label(
-			historico_janela, 
-			text=texto, 
-			font=self.normal_font, 
-			bg=self.bg_color, 
-			justify=tk.LEFT
-		)
-		label_historico.pack(padx=10, pady=10)
+        for i in range(5):
+            for j in range(5):
+                val = cartao.numeros[i][j]
+                lbl = self.label_celulas[i][j]
+                lbl.config(text=str(val))
+                if val == "X":
+                    lbl.config(bg="#90EE90")
+                else:
+                    lbl.config(bg="white")
 
 
-def main():
-	app = BingoGUI()
-	app.mainloop()
-
-if __name__ == "__main__":
-	main()
+    def destroy(self):
+        """
+        Overriding para fechar o client e evitar threads penduradas.
+        """
+        self.parar = True
+        self.client.close()
+        super().destroy()
