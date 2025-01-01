@@ -12,13 +12,21 @@ class BingoClient:
         self.nome_jogador = nome_jogador
 
         self.client_socket = None
-        self.receive_queue = queue.Queue()
 
-        # Cartão local do jogador (somente se is_host=False).
+        # Se for jogador, terá um cartao_local
         self.cartao_local = None
 
-        # Inicia conexão
+        # Guardar estado para exibir na GUI:
+        self.jogadores_lista = []       # ex.: ["Maria", "Joao"]
+        self.ultimos_numeros = []       # até 10 numeros
+        self.status_msg = ""            # p/ o host: "Aguardando 1 jogador...", etc.
+        self.vencedor_msg = ""          # ex.: "Fulano" se é o vencedor
+        self.erro_msg = ""              # caso servidor envie "ERRO ..." ou algo similar
+
+        # Conexão
         self.connect_to_server()
+        # Thread para receber mensagens
+        threading.Thread(target=self.receive_messages, daemon=True).start()
 
     def connect_to_server(self):
         try:
@@ -29,9 +37,6 @@ class BingoClient:
             print("Erro ao conectar no servidor:", e)
             sys.exit(1)
 
-        # Inicia thread de receção de mensagens
-        threading.Thread(target=self.receive_messages, daemon=True).start()
-
         # Envia msg de HOST ou JOIN
         if self.is_host:
             self.send_msg("HOST")
@@ -40,15 +45,13 @@ class BingoClient:
 
     def receive_messages(self):
         """
-        Fica a ler mensagens do servidor e as coloca em self.receive_queue
-        para que a GUI possa interpretá-las.
+        Fica a ler mensagens do servidor, uma por linha, e processa.
         """
         try:
             while True:
                 data = self.client_socket.recv(1024)
                 if not data:
                     break
-                # Pode chegar mais de uma linha ao mesmo tempo, então dividimos
                 linhas = data.decode("utf-8").split("\n")
                 for linha in linhas:
                     linha = linha.strip()
@@ -62,90 +65,83 @@ class BingoClient:
 
     def processar_linha(self, linha):
         """
-        Interpreta linha do servidor. Exemplos:
-          - "CARD 5" => indica que as próximas 5 linhas são a matriz do cartão
-          - "NUMERO 23" => marcar no self.cartao_local
-          - "VENCEDOR Maria" => exibir mensagem de vencedor
-          - "PLAYERS A,B,C" => lista de jogadores
-          - "STATUS Aguardando 1 jogador..." => se for host, exibe status
+        Interpreta o que chega do servidor e atualiza atributos (para a GUI).
         """
-        print(f"[DEBUG] Recebido: {linha}")
-        partes = linha.split(" ")
+        print("[DEBUG] Recebido:", linha)
+        partes = linha.split()
         cmd = partes[0]
 
+        # Recebe o CARTAO (apenas jogador)
         if cmd == "CARD":
-            # Ex: "CARD 5"
+            # "CARD 5"
             tamanho = int(partes[1])
-            # Precisamos ler 'tamanho' linhas a seguir => mas elas podem vir picadas
-            # Para simplificar, vou guardar num buffer e extrair mais tarde.
-            # Porém, aqui como chamamos processar_linha a cada vez que chega algo,
-            # iremos ativar um "modo" de leitura do cartão. 
             self.cartao_local = CartaoBingo(tamanho=tamanho)
-            self.cartao_local.numeros = []  # reset, pois iremos preencher
-
-            # As próximas N linhas do socket vão conter a matriz. 
-            # Solução simples: armazenar "estamos_a_esperar_cartao=5" e no loop
-            #   das próximas 5 messages, iremos append. 
-            # Aqui, farei self.expected_card_lines = tamanho 
-            # e usarei self.reading_card = True
+            self.cartao_local.numeros = []
             self.expected_card_lines = tamanho
             self.reading_card = True
 
         elif hasattr(self, "reading_card") and getattr(self, "reading_card", False) is True:
-            # Estamos lendo as linhas do cartão
+            # Linha de cartão
             linha_numeros = [int(x) for x in linha.split()]
             self.cartao_local.numeros.append(linha_numeros)
             self.expected_card_lines -= 1
             if self.expected_card_lines <= 0:
                 self.reading_card = False
-                print("Cartão recebido com sucesso:", self.cartao_local.numeros)
+                print("Cartão recebido:", self.cartao_local.numeros)
 
         elif cmd == "NUMERO":
             # "NUMERO 23"
             numero = int(partes[1])
-            # Marcamos no cartao_local
+            # Adiciona ao histórico local
+            self.ultimos_numeros.append(numero)
+            # Mantém só os últimos 10
+            if len(self.ultimos_numeros) > 10:
+                self.ultimos_numeros.pop(0)
+
+            # Se for jogador com cartao_local, marca
             if self.cartao_local:
                 self.cartao_local.marcar_numero(numero)
-                print(f"Marcado número {numero} no cartão local.")
-            # A GUI depois pode chamar a func de atualizar
 
         elif cmd == "VENCEDOR":
+            # "VENCEDOR NomeDoJogador"
             vencedor_nome = " ".join(partes[1:])
-            print(f"*** Temos um vencedor: {vencedor_nome} ***")
+            self.vencedor_msg = vencedor_nome
 
         elif cmd == "PLAYERS":
-            # "PLAYERS nome1,nome2,nome3"
+            # "PLAYERS joao,maria,zezinho"
             lista_str = " ".join(partes[1:])
             nomes = lista_str.split(",")
-            print("Jogadores conectados:", nomes)
+            self.jogadores_lista = nomes
 
         elif cmd == "STATUS":
-            # Mensagem para o host
-            status_msg = " ".join(partes[1:])
-            print(f"[STATUS] {status_msg}")
+            # ex.: "STATUS Aguardando 1 jogador..."
+            msg = " ".join(partes[1:])
+            self.status_msg = msg
+
+        elif cmd == "ERRO":
+            # ex.: "ERRO mensagem"
+            msg = " ".join(partes[1:])
+            self.erro_msg = msg
 
         else:
             print(">> Mensagem não reconhecida:", linha)
 
     def sortear_numero(self):
         """
-        Envia "SORTEAR" para o servidor. 
-        (Apenas Host deve chamar isto.)
+        Envia "SORTEAR" para o servidor (apenas host).
         """
         if self.is_host:
             self.send_msg("SORTEAR")
-        else:
-            print("ERRO: Não és o Host.")
 
     def send_msg(self, texto):
-        """
-        Envia uma mensagem para o servidor (com \n no final).
-        """
         try:
             self.client_socket.sendall((texto + "\n").encode("utf-8"))
         except BrokenPipeError:
             print("ERRO: Conexão com o servidor foi encerrada (BrokenPipe).")
 
     def close(self):
-        self.send_msg("SAIR")
+        try:
+            self.send_msg("SAIR")
+        except:
+            pass
         self.client_socket.close()
