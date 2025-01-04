@@ -7,23 +7,25 @@ class DatabaseManager:
         self.create_tables()
 
     def create_tables(self):
-        self.conn = sqlite3.connect(self.db_name)
-        cursor = self.conn.cursor()
-        cursor.execute("""
+        self.conn = sqlite3.connect(self.db_name, check_same_thread=False)
+        c = self.conn.cursor()
+        c.execute("""
             CREATE TABLE IF NOT EXISTS resultados (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                vencedor INTEGER,
-                numero_rodadas INTEGER
+                vencedor_linha TEXT,
+                vencedor_bingo TEXT,
+                concorrentes TEXT,
+                numero_sorteios INTEGER
             )
         """)
         self.conn.commit()
 
-    def registrar_resultado(self, vencedor, numero_rodadas):
-        cursor = self.conn.cursor()
-        cursor.execute("""
-            INSERT INTO resultados (vencedor, numero_rodadas)
-            VALUES (?, ?)
-        """, (vencedor, numero_rodadas))
+    def registrar_jogo(self, vencedor_linha, vencedor_bingo, concorrentes, numero_sorteios):
+        c = self.conn.cursor()
+        c.execute("""
+            INSERT INTO resultados (vencedor_linha, vencedor_bingo, concorrentes, numero_sorteios)
+            VALUES (?, ?, ?, ?)
+        """, (vencedor_linha, vencedor_bingo, concorrentes, numero_sorteios))
         self.conn.commit()
 
     def close(self):
