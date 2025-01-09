@@ -2,7 +2,7 @@ import socket
 import threading
 import random
 from bingo.cartao import CartaoBingo
-
+from database import DatabaseManager
 class BingoServer:
 	def __init__(self, host="127.0.0.1", port=5001):
 		self.host = host
@@ -122,10 +122,10 @@ class BingoServer:
 
 
 
-	def registrar_resultado(self):
+	def registar_resultado(self):
 		db = DatabaseManager()
 		concorrentes = ", ".join([p["nome"] for p in self.players])
-		db.registrar_jogo(
+		db.registar_jogo(
 			vencedor_linha=self.vencedor_linha,
 			vencedor_bingo=self.vencedor_bingo,
 			concorrentes=concorrentes,

@@ -20,7 +20,7 @@ class DatabaseManager:
         """)
         self.conn.commit()
 
-    def registrar_jogo(self, vencedor_linha, vencedor_bingo, concorrentes, numero_sorteios):
+    def registar_jogo(self, vencedor_linha, vencedor_bingo, concorrentes, numero_sorteios):
         c = self.conn.cursor()
         c.execute("""
             INSERT INTO resultados (vencedor_linha, vencedor_bingo, concorrentes, numero_sorteios)

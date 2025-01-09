@@ -9,7 +9,7 @@ class BingoGUI(tk.Tk):
 	def __init__(self, is_host=True, nome="Jogador"):
 		super().__init__()
 		self.title("Simulador de Bingo Deluxe")
-		self.geometry("600x400")
+		self.geometry("600x650")
 		self.is_host = is_host
 		self.nome = nome
 		self.db = DatabaseManager()
